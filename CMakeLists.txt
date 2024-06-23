@@ -10,6 +10,12 @@ set(CMAKE_CXX_STANDARD 17)
 # Generate compile_commands.json for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Use board-specific defines in lard61.h
+if(NOT DEFINED PICO_BOARD)
+  set(PICO_BOARD_HEADER_DIRS ${PROJECT_SOURCE_DIR})
+  set(PICO_BOARD lard61)
+endif()
+
 # Initialize the SDK
 pico_sdk_init()
 

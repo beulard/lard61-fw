@@ -1,6 +1,6 @@
 #include "pico/stdlib.h"
 
-#define LED_PIN 7
+#define LED_PIN PICO_DEFAULT_LED_PIN
 
 int main() {
     gpio_init(LED_PIN);
