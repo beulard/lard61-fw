@@ -21,6 +21,7 @@ pico_sdk_init()
 
 add_subdirectory(blink)
 add_subdirectory(usb_output)
+add_subdirectory(usb_device)
 
 #add_custom_target(deploy
 #  COMMAND sudo openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "adapter speed 5000" -c "program blink.elf verify reset exit"
