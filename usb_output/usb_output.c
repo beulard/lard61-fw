@@ -4,10 +4,7 @@
 #include "hardware/gpio.h"
 #include "pico/time.h"
 
-// On Pico
 #define LED_PIN PICO_DEFAULT_LED_PIN
-// On lard61 target
-// #define LED_PIN 7
 
 int main() {
   stdio_init_all();
