@@ -1,8 +1,4 @@
-/**
- * Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
- *
- * SPDX-License-Identifier: BSD-3-Clause
- */
+// Appear as a USB HID device to the USB host
 
 #include "boards/pico.h"
 #include "hardware/gpio.h"
@@ -12,10 +8,15 @@
 #include "tusb_config.h"
 #include "tusb.h"
 
+#define LED_PIN PICO_DEFAULT_LED_PIN
+
+// Talk over uart0
 void uart_task();
+// Blink the led in different ways depending on usb state
 void led_task();
 
 int main() {
+  // uart will only work on a Pico board, not on the actual lard61
   uart_init(uart0, 115200);
 
   tud_init(BOARD_TUD_RHPORT);
@@ -23,17 +24,54 @@ int main() {
   gpio_set_function(0, GPIO_FUNC_UART);
   gpio_set_function(1, GPIO_FUNC_UART);
 
-  gpio_init(PICO_DEFAULT_LED_PIN);
-  gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+  gpio_init(LED_PIN);
+  gpio_set_dir(LED_PIN, GPIO_OUT);
 
   while (true) {
     uart_task();
-    // TODO(mdu) do something different depending on the USB state
-    // Connected, sleeping, etc.
     led_task();
     tud_task();
   }
 }
+
+
+//--------------------------
+// Blink parameters
+//--------------------------
+#define BLINK_MOUNTED 250
+#define BLINK_UNMOUNTED 1000
+#define BLINK_SUSPENDED 2500
+
+uint blink_interval_ms = BLINK_SUSPENDED;
+
+//--------------------------
+// USB callbacks
+//--------------------------
+
+// USB bus is mounted (configured)
+void tud_mount_cb() {
+  blink_interval_ms = BLINK_MOUNTED;
+}
+
+// USB bus is unmounted
+void tud_umount_cb() {
+  blink_interval_ms = BLINK_UNMOUNTED;
+}
+
+// USB bus is suspended
+void tud_suspend_cb(bool remote_wakeup_en) {
+  (void)remote_wakeup_en;
+  blink_interval_ms = BLINK_SUSPENDED;
+}
+
+// USB bus is resumed
+void tud_resume_cb() {
+  blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_UNMOUNTED;
+}
+
+//--------------------------
+// Tasks
+//--------------------------
 
 void uart_task() {
   static absolute_time_t start;
@@ -46,7 +84,7 @@ void uart_task() {
   }
   start = get_absolute_time();
 
-  uart_puts(uart0, "Hello, saucisse!\r\n");
+  uart_puts(uart0, "Hello from pico!\r\n");
 }
 
 void led_task() {
@@ -55,44 +93,11 @@ void led_task() {
 
   absolute_time_t t = get_absolute_time();
 
-  // Every 250ms, toggle
-  if (absolute_time_diff_us(start, t) < 125000) {
+  if (absolute_time_diff_us(start, t) < blink_interval_ms * 1000) {
     return;
   }
   start = get_absolute_time();
 
-  gpio_put(PICO_DEFAULT_LED_PIN, led_state);
+  gpio_put(LED_PIN, led_state);
   led_state = !led_state;
-}
-
-//--------------------------------------------------------------------+
-// USB HID
-//--------------------------------------------------------------------+
-
-// Invoked when received GET_REPORT control request
-// Application must fill buffer report's content and return its length.
-// Return zero will cause the stack to STALL request
-uint16_t tud_hid_get_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
-{
-  // TODO not Implemented
-  (void) itf;
-  (void) report_id;
-  (void) report_type;
-  (void) buffer;
-  (void) reqlen;
-
-  return 0;
-}
-
-// Invoked when received SET_REPORT control request or
-// received data on OUT endpoint ( Report ID = 0, Type = 0 )
-void tud_hid_set_report_cb(uint8_t itf, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
-{
-  // This example doesn't use multiple report and report ID
-  (void) itf;
-  (void) report_id;
-  (void) report_type;
-
-  // echo back anything we received from host
-  tud_hid_report(0, buffer, bufsize);
 }
