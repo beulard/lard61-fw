@@ -2,7 +2,11 @@
 add_executable(usb_device
         usb_device.c
         usb_descriptors.c
+        key_matrix.c
 )
+
+# enable output via usb cdc
+pico_enable_stdio_uart(usb_device 1)
 
 # Required for tinyusb to find our tusb_config.h
 target_include_directories(usb_device PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
