@@ -5,6 +5,9 @@
 
 #define N_ROWS 5
 #define N_COLS 14
+#define TOTAL_KEYS 61
+
+static const uint n_keys_in_row[N_ROWS] = {14, 14, 13, 12, 8};
 
 static const uint row_pins[N_ROWS] = {
     19,  // row0
@@ -34,5 +37,10 @@ static const uint col_pins[N_COLS] = {
 
 // Setup GPIOs of the key matrix
 void setup_keymatrix();
+// Get the row index corresponding to a GPIO pin
+uint get_row(uint gpio);
+// Get the first key index for a given row index
+// e.g. row 2 => first key is key 28
+uint get_row_offset(uint row);
 
 #endif /* _KEY_MATRIX_H */

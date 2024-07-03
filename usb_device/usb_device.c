@@ -11,7 +11,9 @@
 
 #define LED_PIN PICO_DEFAULT_LED_PIN
 
-bool pressed[N_COLS * N_ROWS] = {0};
+// Keymatrix column whose pin is currently high
+volatile uint active_col = 1;
+volatile bool pressed[TOTAL_KEYS] = {0};
 
 // Update array of pressed keys
 void update_pressed_task();
@@ -19,6 +21,8 @@ void update_pressed_task();
 void uart_task();
 // Blink the led in different ways depending on usb state
 void led_task();
+// Interrupt callback for a rising edge event on one of the row pins
+void keymatrix_gpio_callback(uint gpio, uint32_t event_mask);
 
 int main() {
   // uart will only work on a Pico board, not on the actual lard61
@@ -30,6 +34,10 @@ int main() {
 
   gpio_init(LED_PIN);
   gpio_set_dir(LED_PIN, GPIO_OUT);
+
+  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, true);
+  gpio_set_irq_callback(&keymatrix_gpio_callback);
+  irq_set_enabled(IO_IRQ_BANK0, true);
 
   while (true) {
     uart_task();
@@ -50,28 +58,18 @@ int main() {
 uint blink_interval_ms = BLINK_SUSPENDED;
 
 //--------------------------
-// USB callbacks
+// IRQ handlers
 //--------------------------
 
-// USB bus is mounted (configured)
-void tud_mount_cb() {
-  blink_interval_ms = BLINK_MOUNTED;
-}
-
-// USB bus is unmounted
-void tud_umount_cb() {
-  blink_interval_ms = BLINK_UNMOUNTED;
-}
-
-// USB bus is suspended
-void tud_suspend_cb(bool remote_wakeup_en) {
-  (void)remote_wakeup_en;
-  blink_interval_ms = BLINK_SUSPENDED;
-}
-
-// USB bus is resumed
-void tud_resume_cb() {
-  blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_UNMOUNTED;
+void keymatrix_gpio_callback(uint gpio, uint32_t event_mask) {
+  // No need to call gpio_acknowledge_irq, it is called automatically
+  if (event_mask & GPIO_IRQ_EDGE_RISE) {
+    // If we see a rising edge, then the key identified by the active row and
+    // column is pressed.
+    uint row = get_row(gpio);
+    uint row_offset = get_row_offset(row);
+    pressed[row_offset + active_col] = true;
+  }
 }
 
 //--------------------------
@@ -79,18 +77,34 @@ void tud_resume_cb() {
 //--------------------------
 
 void update_pressed_task() {
-  // Turn column on, check state of all rows
-  gpio_put(col_pins[1], true);
+  // Turn column on, let irq on rows update the pressed table
 
-  // Wait for signal to propagate
-  sleep_us(1);
+  // TODO(mdu) LED pin on pico colliding with current active col
+  // Change row so we can see LED blinking.
+  active_col = 1;
+  uint active_row = 0;
 
-  bool key_one = gpio_get(row_pins[0]);
+  // Reset pressed state to unpressed, let the interrupts set the state
+  // high if the key is actually pressed
+  uint row_offset = get_row_offset(active_row);
+  memset((void*)(pressed + row_offset), 0,
+         n_keys_in_row[active_row] * sizeof(bool));
 
-  gpio_put(col_pins[1], false);
+  // Enable the rising edge interrupt for our input pins
+  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, true);
+  // Send the high signal in the active column
+  gpio_put(col_pins[active_col], true);
 
-  if (key_one) {
-    printf("1 is down\n");
+  // Any key which is pressed here will trigger a rising edge interrupt on the
+  // associated pin, which will update the pressed table.
+
+  // Disable falling edge irq since we're about to turn the column pin low
+  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, false);
+  gpio_put(col_pins[active_col], false);
+
+  // Check the pressed table and update
+  if (pressed[active_col + get_row_offset(active_row)]) {
+    printf("pressed\n");
   }
 }
 
@@ -121,4 +135,29 @@ void led_task() {
 
   gpio_put(LED_PIN, led_state);
   led_state = !led_state;
+}
+
+//--------------------------
+// USB callbacks
+//--------------------------
+
+// USB bus is mounted (configured)
+void tud_mount_cb() {
+  blink_interval_ms = BLINK_MOUNTED;
+}
+
+// USB bus is unmounted
+void tud_umount_cb() {
+  blink_interval_ms = BLINK_UNMOUNTED;
+}
+
+// USB bus is suspended
+void tud_suspend_cb(bool remote_wakeup_en) {
+  (void)remote_wakeup_en;
+  blink_interval_ms = BLINK_SUSPENDED;
+}
+
+// USB bus is resumed
+void tud_resume_cb() {
+  blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_UNMOUNTED;
 }

@@ -25,3 +25,25 @@ void setup_keymatrix() {
 
   printf("Key matrix pins initialized\n");
 }
+
+uint get_row(uint gpio) {
+  switch (gpio) {
+    case 19:
+      return 0;
+    case 20:
+      return 1;
+    case 21:
+      return 2;
+    case 22:
+      return 3;
+    case 18:
+      return 4;
+    default:
+      return (uint)(-1);
+  }
+}
+
+uint get_row_offset(uint row) {
+  for (uint i = 0; i < row; ++i) {
+  }
+}
