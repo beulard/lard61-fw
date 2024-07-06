@@ -27,4 +27,4 @@
 #define PICO_RP2040_B0_SUPPORTED 1
 #endif
 
-#endif
+#endif /* _BOARDS_LARD61_H */

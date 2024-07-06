@@ -19,15 +19,29 @@ static const uint row_pins[N_ROWS] = {
 
 static const uint col_pins[N_COLS] = {
     23,  // col0
+#ifdef LARD61
     25,  // col1
+#elif defined RASPBERRYPI_PICO
+    // Used for LED
+    23,  // col1
+#else
+    #error Unknown board
+#endif
     26,  // col2
     24,  // col3
     27,  // col4
     28,  // col5
     29,  // col6
-    // Also used for uart comm on dev Pico
+#ifdef LARD61
+    0,   // col7
+    1,   // col8
+#elif defined RASPBERRYPI_PICO
+    // Also used for uart comm on dev Pico => use col6 pin
     29,  // 0,   // col7
     29,  // 1,   // col8
+#else
+    #error Unknown board
+#endif
     2,   // col9
     3,   // col10
     4,   // col11

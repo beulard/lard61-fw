@@ -44,6 +44,9 @@ uint get_row(uint gpio) {
 }
 
 uint get_row_offset(uint row) {
+  uint offset = 0;
   for (uint i = 0; i < row; ++i) {
+    offset += n_keys_in_row[i];
   }
+  return offset;
 }

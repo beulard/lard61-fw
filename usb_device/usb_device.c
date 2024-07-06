@@ -1,8 +1,7 @@
-// Appear as a USB HID device to the USB host
+// Query the state of each key and report via USB as a HID.
 
-#include "boards/pico.h"
+#include "pico/stdlib.h"
 #include "hardware/gpio.h"
-#include "hardware/uart.h"
 #include "key_matrix.h"
 #include "pico/time.h"
 #include "pico/types.h"
@@ -11,12 +10,19 @@
 
 #define LED_PIN PICO_DEFAULT_LED_PIN
 
-// Keymatrix column whose pin is currently high
-volatile uint active_col = 1;
-volatile bool pressed[TOTAL_KEYS] = {0};
+// Keymatrix column whose pin is currently high.
+// Shared state between the main process and keymatrix_gpio_callback.
+volatile uint active_col = 0;
+
+// The array is slightly larger than it need to be: we only have 61 physical
+// keys. This is just more convenient for looping over rows and columns.
+// Shared state between the main process and keymatrix_gpio_callback.
+volatile bool pressed[N_COLS * N_ROWS] = {0};
 
 // Update array of pressed keys
 void update_pressed_task();
+// Send HID report every 10ms
+void hid_task();
 // Talk over uart0
 void uart_task();
 // Blink the led in different ways depending on usb state
@@ -27,6 +33,9 @@ void keymatrix_gpio_callback(uint gpio, uint32_t event_mask);
 int main() {
   // uart will only work on a Pico board, not on the actual lard61
   stdio_init_all();
+
+  printf("RP2040 chip version %d\n", rp2040_chip_version());
+  printf("RP2040 rom version %d\n", rp2040_rom_version());
 
   tud_init(BOARD_TUD_RHPORT);
 
@@ -41,7 +50,23 @@ int main() {
 
   while (true) {
     uart_task();
+
+    absolute_time_t update_start = get_absolute_time();
     update_pressed_task();
+    int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
+    printf("Time to run update: %lld us\n", diff);
+
+    // Log pressed keys
+    for (uint col = 0; col < N_COLS; ++col) {
+      for (uint row = 0; row < N_ROWS; ++row) {
+        // Check the pressed table and update
+        if (pressed[col + get_row_offset(row)]) {
+          printf("pressed %d %d\n", col, row);
+        }
+      }
+    }
+
+    hid_task();
     led_task();
     tud_task();
   }
@@ -79,38 +104,45 @@ void keymatrix_gpio_callback(uint gpio, uint32_t event_mask) {
 void update_pressed_task() {
   // Turn column on, let irq on rows update the pressed table
 
-  // TODO(mdu) LED pin on pico colliding with current active col
-  // Change row so we can see LED blinking.
-  active_col = 1;
-  uint active_row = 0;
+  // Reset pressed state to unpressed, let the interrupts set the state high if
+  // the key is actually pressed
+  memset((void*)pressed, 0, sizeof(pressed));
 
-  // Reset pressed state to unpressed, let the interrupts set the state
-  // high if the key is actually pressed
-  uint row_offset = get_row_offset(active_row);
-  memset((void*)(pressed + row_offset), 0,
-         n_keys_in_row[active_row] * sizeof(bool));
+  // Note active_col is set here and used in the gpio callback to write
+  // into the right location of `pressed`.
+  for (active_col = 0; active_col < N_COLS; ++active_col) {
+    for (uint row = 0; row < N_ROWS; ++row) {
+      // Enable the rising edge interrupt for our input pins
+      gpio_set_irq_enabled(row_pins[row], GPIO_IRQ_EDGE_RISE, true);
+      // Send the high signal in the active column
+      gpio_put(col_pins[active_col], true);
 
-  // Enable the rising edge interrupt for our input pins
-  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, true);
-  // Send the high signal in the active column
-  gpio_put(col_pins[active_col], true);
+      // Any key which is pressed here will trigger a rising edge interrupt on
+      // the associated pin, which will call keymatrix_gpio_callback to update
+      // the `pressed` table.
 
-  // Any key which is pressed here will trigger a rising edge interrupt on the
-  // associated pin, which will update the pressed table.
-
-  // Disable falling edge irq since we're about to turn the column pin low
-  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, false);
-  gpio_put(col_pins[active_col], false);
-
-  // Check the pressed table and update
-  if (pressed[active_col + get_row_offset(active_row)]) {
-    printf("pressed\n");
+      // Disable falling edge irq since we're about to turn the column pin low
+      gpio_set_irq_enabled(row_pins[row], GPIO_IRQ_EDGE_RISE, false);
+      gpio_put(col_pins[active_col], false);
+    }
   }
+}
+
+void hid_task() {
+  static absolute_time_t start;
+  absolute_time_t t = get_absolute_time();
+
+  // Every 10ms, send a report
+  if (absolute_time_diff_us(start, t) < 10000) {
+    return;
+  }
+  start = get_absolute_time();
+
+  printf("Hello hid\n");
 }
 
 void uart_task() {
   static absolute_time_t start;
-
   absolute_time_t t = get_absolute_time();
 
   // Every 2s, print
