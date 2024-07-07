@@ -1,8 +1,8 @@
 // Query the state of each key and report via USB as a HID.
 
-#include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "key_matrix.h"
+#include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/types.h"
 #include "tusb.h"
@@ -19,6 +19,10 @@ volatile uint active_col = 0;
 // Shared state between the main process and keymatrix_gpio_callback.
 volatile bool pressed[N_COLS * N_ROWS] = {0};
 
+// TODO(mdu) can use rx cb to fill ?
+// TODO(mdu) make it a ring buffer
+char command_buffer[256];
+
 // Update array of pressed keys
 void update_pressed_task();
 // Send HID report every 10ms
@@ -27,6 +31,8 @@ void hid_task();
 void uart_task();
 // Blink the led in different ways depending on usb state
 void led_task();
+// Send data as a serial device
+void cdc_task();
 // Interrupt callback for a rising edge event on one of the row pins
 void keymatrix_gpio_callback(uint gpio, uint32_t event_mask);
 
@@ -38,6 +44,7 @@ int main() {
   printf("RP2040 rom version %d\n", rp2040_rom_version());
 
   tud_init(BOARD_TUD_RHPORT);
+  tud_cdc_set_wanted_char('\r');
 
   setup_keymatrix();
 
@@ -54,7 +61,7 @@ int main() {
     absolute_time_t update_start = get_absolute_time();
     update_pressed_task();
     int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
-    printf("Time to run update: %lld us\n", diff);
+    // printf("Time to run update: %lld us\n", diff);
 
     // Log pressed keys
     for (uint col = 0; col < N_COLS; ++col) {
@@ -66,9 +73,10 @@ int main() {
       }
     }
 
-    hid_task();
-    led_task();
     tud_task();
+    // hid_task();
+    led_task();
+    cdc_task();
   }
 }
 
@@ -138,6 +146,7 @@ void hid_task() {
   }
   start = get_absolute_time();
 
+  // TODO(mdu) poll keys and send report
   printf("Hello hid\n");
 }
 
@@ -152,6 +161,23 @@ void uart_task() {
   start = get_absolute_time();
 
   printf("alive\n");
+}
+
+void cdc_task() {
+  // printf("cdc task\n");
+  // connected() check for DTR bit
+  // Most but not all terminal client set this when making connection
+  if (tud_cdc_connected()) {
+    if (tud_cdc_available()) {
+      printf("read\n");
+
+      uint8_t buf[64];
+      uint sz = tud_cdc_read(buf, sizeof(buf));
+
+      tud_cdc_write(buf, sz);
+      tud_cdc_write_flush();
+    }
+  }
 }
 
 void led_task() {
@@ -192,4 +218,69 @@ void tud_suspend_cb(bool remote_wakeup_en) {
 // USB bus is resumed
 void tud_resume_cb() {
   blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_UNMOUNTED;
+}
+
+//--------------------------
+// USB CDC
+//--------------------------
+
+// Invoked when cdc when line state changed e.g connected/disconnected
+void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
+  (void)itf;
+
+  if (dtr && rts) {
+    // say hi on connection :)
+    tud_cdc_write_str("Hi from lard61 !\r\n");
+    tud_cdc_write_flush();
+  }
+}
+
+// Wait for a specific character
+void tud_cdc_rx_wanted_cb(uint8_t itf, char wanted_char) {
+  (void)itf;
+
+  tud_cdc_write_char('\n');
+  tud_cdc_write_flush();
+
+  // Consume the contents of the command buffer
+  // TODO(mdu)
+  // process_command_buffer();
+}
+
+//--------------------------------------------------------------------+
+// USB HID
+//--------------------------------------------------------------------+
+
+// Invoked when received GET_REPORT control request
+// Application must fill buffer report's content and return its length.
+// Return zero will cause the stack to STALL request
+uint16_t tud_hid_get_report_cb(uint8_t itf,
+                               uint8_t report_id,
+                               hid_report_type_t report_type,
+                               uint8_t* buffer,
+                               uint16_t reqlen) {
+  // TODO not Implemented
+  (void)itf;
+  (void)report_id;
+  (void)report_type;
+  (void)buffer;
+  (void)reqlen;
+
+  return 0;
+}
+
+// Invoked when received SET_REPORT control request or
+// received data on OUT endpoint ( Report ID = 0, Type = 0 )
+void tud_hid_set_report_cb(uint8_t itf,
+                           uint8_t report_id,
+                           hid_report_type_t report_type,
+                           uint8_t const* buffer,
+                           uint16_t bufsize) {
+  // This example doesn't use multiple report and report ID
+  (void)itf;
+  (void)report_id;
+  (void)report_type;
+
+  // echo back anything we received from host
+  tud_hid_report(0, buffer, bufsize);
 }
