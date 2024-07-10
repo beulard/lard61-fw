@@ -1,5 +1,6 @@
 // Query the state of each key and report via USB as a HID.
 
+#include "cdc.h"
 #include "hardware/gpio.h"
 #include "key_matrix.h"
 #include "pico/stdlib.h"
@@ -19,10 +20,6 @@ volatile uint active_col = 0;
 // Shared state between the main process and keymatrix_gpio_callback.
 volatile bool pressed[N_COLS * N_ROWS] = {0};
 
-// TODO(mdu) can use rx cb to fill ?
-// TODO(mdu) make it a ring buffer
-char command_buffer[256];
-
 // Update array of pressed keys
 void update_pressed_task();
 // Send HID report every 10ms
@@ -40,13 +37,10 @@ int main() {
   // uart will only work on a Pico board, not on the actual lard61
   stdio_init_all();
 
-  printf("RP2040 chip version %d\n", rp2040_chip_version());
-  printf("RP2040 rom version %d\n", rp2040_rom_version());
-
   tud_init(BOARD_TUD_RHPORT);
-  tud_cdc_set_wanted_char('\r');
 
-  setup_keymatrix();
+  cdc_setup();
+  keymatrix_setup();
 
   gpio_init(LED_PIN);
   gpio_set_dir(LED_PIN, GPIO_OUT);
@@ -67,14 +61,14 @@ int main() {
     for (uint col = 0; col < N_COLS; ++col) {
       for (uint row = 0; row < N_ROWS; ++row) {
         // Check the pressed table and update
-        if (pressed[col + get_row_offset(row)]) {
+        if (pressed[col + keymatrix_get_row_offset(row)]) {
           printf("pressed %d %d\n", col, row);
         }
       }
     }
 
     tud_task();
-    // hid_task();
+    hid_task();
     led_task();
     cdc_task();
   }
@@ -99,8 +93,8 @@ void keymatrix_gpio_callback(uint gpio, uint32_t event_mask) {
   if (event_mask & GPIO_IRQ_EDGE_RISE) {
     // If we see a rising edge, then the key identified by the active row and
     // column is pressed.
-    uint row = get_row(gpio);
-    uint row_offset = get_row_offset(row);
+    uint row = keymatrix_get_row(gpio);
+    uint row_offset = keymatrix_get_row_offset(row);
     pressed[row_offset + active_col] = true;
   }
 }
@@ -147,7 +141,7 @@ void hid_task() {
   start = get_absolute_time();
 
   // TODO(mdu) poll keys and send report
-  printf("Hello hid\n");
+  // printf("Hello hid\n");
 }
 
 void uart_task() {
@@ -160,7 +154,8 @@ void uart_task() {
   }
   start = get_absolute_time();
 
-  printf("alive\n");
+  // printf("alive\n");
+  // lard61_printf("alive\n");
 }
 
 void cdc_task() {
@@ -169,13 +164,11 @@ void cdc_task() {
   // Most but not all terminal client set this when making connection
   if (tud_cdc_connected()) {
     if (tud_cdc_available()) {
-      printf("read\n");
+      // uint8_t buf[64];
+      // uint sz = tud_cdc_read(buf, sizeof(buf));
 
-      uint8_t buf[64];
-      uint sz = tud_cdc_read(buf, sizeof(buf));
-
-      tud_cdc_write(buf, sz);
-      tud_cdc_write_flush();
+      // tud_cdc_write(buf, sz);
+      // tud_cdc_write_flush();
     }
   }
 }
@@ -196,7 +189,7 @@ void led_task() {
 }
 
 //--------------------------
-// USB callbacks
+// USB state callbacks
 //--------------------------
 
 // USB bus is mounted (configured)
@@ -220,35 +213,9 @@ void tud_resume_cb() {
   blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_UNMOUNTED;
 }
 
-//--------------------------
-// USB CDC
-//--------------------------
-
-// Invoked when cdc when line state changed e.g connected/disconnected
-void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
-  (void)itf;
-
-  if (dtr && rts) {
-    // say hi on connection :)
-    tud_cdc_write_str("Hi from lard61 !\r\n");
-    tud_cdc_write_flush();
-  }
-}
-
-// Wait for a specific character
-void tud_cdc_rx_wanted_cb(uint8_t itf, char wanted_char) {
-  (void)itf;
-
-  tud_cdc_write_char('\n');
-  tud_cdc_write_flush();
-
-  // Consume the contents of the command buffer
-  // TODO(mdu)
-  // process_command_buffer();
-}
 
 //--------------------------------------------------------------------+
-// USB HID
+// USB HID callbacks
 //--------------------------------------------------------------------+
 
 // Invoked when received GET_REPORT control request
@@ -266,6 +233,8 @@ uint16_t tud_hid_get_report_cb(uint8_t itf,
   (void)buffer;
   (void)reqlen;
 
+  tud_cdc_write_str("tud_hid_get_report_cb !!!\n");
+
   return 0;
 }
 
@@ -279,7 +248,23 @@ void tud_hid_set_report_cb(uint8_t itf,
   // This example doesn't use multiple report and report ID
   (void)itf;
   (void)report_id;
-  (void)report_type;
+
+  printf("tud_hid_set_report_cb %d %d %d %d %d\n", itf, report_id, report_type,
+         bufsize, buffer[0]);
+
+  if (report_type == HID_REPORT_TYPE_OUTPUT) {
+    // bufsize should be (at least) 1
+    if (bufsize < 1)
+      return;
+
+    uint8_t const kbd_leds = buffer[0];
+
+    if (kbd_leds & KEYBOARD_LED_CAPSLOCK) {
+      tud_cdc_write_str("Capslock on !\r\n");
+    } else {
+      tud_cdc_write_str("Capslock off !\r\n");
+    }
+  }
 
   // echo back anything we received from host
   tud_hid_report(0, buffer, bufsize);

@@ -6,7 +6,7 @@
 // Setup
 //--------------------------
 
-void setup_keymatrix() {
+void keymatrix_setup() {
   // Set all row pins as input
   // printf("Row pins\n");
   for (uint i = 0; i < N_ROWS; ++i) {
@@ -26,7 +26,7 @@ void setup_keymatrix() {
   printf("Key matrix pins initialized\n");
 }
 
-uint get_row(uint gpio) {
+uint keymatrix_get_row(uint gpio) {
   switch (gpio) {
     case 19:
       return 0;
@@ -43,7 +43,7 @@ uint get_row(uint gpio) {
   }
 }
 
-uint get_row_offset(uint row) {
+uint keymatrix_get_row_offset(uint row) {
   uint offset = 0;
   for (uint i = 0; i < row; ++i) {
     offset += n_keys_in_row[i];

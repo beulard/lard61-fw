@@ -50,11 +50,11 @@ static const uint col_pins[N_COLS] = {
 };
 
 // Setup GPIOs of the key matrix
-void setup_keymatrix();
+void keymatrix_setup();
 // Get the row index corresponding to a GPIO pin
-uint get_row(uint gpio);
+uint keymatrix_get_row(uint gpio);
 // Get the first key index for a given row index
 // e.g. row 2 => first key is key 28
-uint get_row_offset(uint row);
+uint keymatrix_get_row_offset(uint row);
 
 #endif /* _KEY_MATRIX_H */
