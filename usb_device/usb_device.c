@@ -1,6 +1,6 @@
 // Query the state of each key and report via USB as a HID.
 
-#include "cdc.h"
+#include "lard61_cdc.h"
 #include "hardware/gpio.h"
 #include "key_matrix.h"
 #include "pico/stdlib.h"
@@ -15,6 +15,9 @@
 // Shared state between the main process and keymatrix_gpio_callback.
 volatile uint active_col = 0;
 
+
+// TODO(mdu) move to lard61_hid file
+
 // The array is slightly larger than it need to be: we only have 61 physical
 // keys. This is just more convenient for looping over rows and columns.
 // Shared state between the main process and keymatrix_gpio_callback.
@@ -24,12 +27,8 @@ volatile bool pressed[N_COLS * N_ROWS] = {0};
 void update_pressed_task();
 // Send HID report every 10ms
 void hid_task();
-// Talk over uart0
-void uart_task();
 // Blink the led in different ways depending on usb state
 void led_task();
-// Send data as a serial device
-void cdc_task();
 // Interrupt callback for a rising edge event on one of the row pins
 void keymatrix_gpio_callback(uint gpio, uint32_t event_mask);
 
@@ -39,7 +38,7 @@ int main() {
 
   tud_init(BOARD_TUD_RHPORT);
 
-  cdc_setup();
+  l61_cdc_setup();
   keymatrix_setup();
 
   gpio_init(LED_PIN);
@@ -50,27 +49,9 @@ int main() {
   irq_set_enabled(IO_IRQ_BANK0, true);
 
   while (true) {
-    uart_task();
-
-    absolute_time_t update_start = get_absolute_time();
-    update_pressed_task();
-    int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
-    // printf("Time to run update: %lld us\n", diff);
-
-    // Log pressed keys
-    for (uint col = 0; col < N_COLS; ++col) {
-      for (uint row = 0; row < N_ROWS; ++row) {
-        // Check the pressed table and update
-        if (pressed[col + keymatrix_get_row_offset(row)]) {
-          printf("pressed %d %d\n", col, row);
-        }
-      }
-    }
-
     tud_task();
     hid_task();
     led_task();
-    cdc_task();
   }
 }
 
@@ -141,36 +122,24 @@ void hid_task() {
   start = get_absolute_time();
 
   // TODO(mdu) poll keys and send report
-  // printf("Hello hid\n");
-}
+  // Call update_pressed and report the results !
 
-void uart_task() {
-  static absolute_time_t start;
-  absolute_time_t t = get_absolute_time();
+  /*
+  absolute_time_t update_start = get_absolute_time();
+  update_pressed_task();
+  int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
+  // printf("Time to run update: %lld us\n", diff);
 
-  // Every 2s, print
-  if (absolute_time_diff_us(start, t) < 2000000) {
-    return;
-  }
-  start = get_absolute_time();
-
-  // printf("alive\n");
-  // lard61_printf("alive\n");
-}
-
-void cdc_task() {
-  // printf("cdc task\n");
-  // connected() check for DTR bit
-  // Most but not all terminal client set this when making connection
-  if (tud_cdc_connected()) {
-    if (tud_cdc_available()) {
-      // uint8_t buf[64];
-      // uint sz = tud_cdc_read(buf, sizeof(buf));
-
-      // tud_cdc_write(buf, sz);
-      // tud_cdc_write_flush();
+  // Log pressed keys
+  for (uint col = 0; col < N_COLS; ++col) {
+    for (uint row = 0; row < N_ROWS; ++row) {
+      // Check the pressed table and update
+      if (pressed[col + keymatrix_get_row_offset(row)]) {
+        printf("pressed %d %d\n", col, row);
+      }
     }
   }
+  */
 }
 
 void led_task() {
@@ -213,7 +182,6 @@ void tud_resume_cb() {
   blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_UNMOUNTED;
 }
 
-
 //--------------------------------------------------------------------+
 // USB HID callbacks
 //--------------------------------------------------------------------+
@@ -249,8 +217,8 @@ void tud_hid_set_report_cb(uint8_t itf,
   (void)itf;
   (void)report_id;
 
-  printf("tud_hid_set_report_cb %d %d %d %d %d\n", itf, report_id, report_type,
-         bufsize, buffer[0]);
+  // printf("tud_hid_set_report_cb %d %d %d %d %d\n", itf, report_id, report_type,
+        //  bufsize, buffer[0]);
 
   if (report_type == HID_REPORT_TYPE_OUTPUT) {
     // bufsize should be (at least) 1
@@ -260,9 +228,9 @@ void tud_hid_set_report_cb(uint8_t itf,
     uint8_t const kbd_leds = buffer[0];
 
     if (kbd_leds & KEYBOARD_LED_CAPSLOCK) {
-      tud_cdc_write_str("Capslock on !\r\n");
+      l61_printf("Capslock on !\n");
     } else {
-      tud_cdc_write_str("Capslock off !\r\n");
+      l61_printf("Capslock off !\n");
     }
   }
 

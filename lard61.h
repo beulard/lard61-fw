@@ -22,7 +22,6 @@
 #define PICO_FLASH_SIZE_BYTES (4 * 1024 * 1024)
 #endif
 
-// TODO(mdu) check with rp2040_chip_version
 #ifndef PICO_RP2040_B0_SUPPORTED
 #define PICO_RP2040_B0_SUPPORTED 1
 #endif

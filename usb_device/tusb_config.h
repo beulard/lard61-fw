@@ -98,11 +98,13 @@
 #define CFG_TUD_VENDOR            0
 
 // HID buffer size Should be sufficient to hold ID (if any) + Data
-#define CFG_TUD_HID_EP_BUFSIZE    64
+#define CFG_TUD_HID_EP_BUFSIZE 64
 
 // CDC FIFO size of TX and RX
-#define CFG_TUD_CDC_RX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
-#define CFG_TUD_CDC_TX_BUFSIZE   (TUD_OPT_HIGH_SPEED ? 512 : 64)
+// When printing large amounts of stuff, increasing this
+// can prevent data from being cut off.
+#define CFG_TUD_CDC_RX_BUFSIZE 256
+#define CFG_TUD_CDC_TX_BUFSIZE 256
 
 #ifdef __cplusplus
  }
