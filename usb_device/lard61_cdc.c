@@ -2,20 +2,36 @@
 ** file: lard61_cdc.c
 ** author: beulard (Matthias Dubouchet)
 ** creation date: 11/07/2024
+**
+** In here we define a command buffer which is filled with data coming from
+** the host via the CDC USB interface. The filling is done by tud_cdc_rx_cb.
+**
+** We also implement a tiny shell where specific strings sent by the host
+** are interpreted as instructions, for example to reset the keyboard in
+** BOOTSEL mode remotely and allow a subsequent firmware reflash.
 */
 
 #include "lard61_cdc.h"
 
+#include <pico/bootrom.h>
+#include <stdarg.h>
+
+#include "class/cdc/cdc_device.h"
+
+//-----------------------------------------------------------------------------
+// Static variables
+//-----------------------------------------------------------------------------
+
 // Private command buffer with a write pointer
-struct {
+static struct {
   char buffer[LARD61_COMMAND_BUFFER_SIZE];
   // Current write position
   char* write;
 } command_buf = {.buffer = {0}, .write = command_buf.buffer};
 
-//--------------------------
+//-----------------------------------------------------------------------------
 // Public API
-//--------------------------
+//-----------------------------------------------------------------------------
 
 void l61_cdc_setup() {
   tud_cdc_set_wanted_char('\r');
@@ -33,11 +49,11 @@ void l61_printf(const char* fmt, ...) {
   tud_cdc_write_flush();
 }
 
-//--------------------------
+//-----------------------------------------------------------------------------
 // Internal API
-//--------------------------
+//-----------------------------------------------------------------------------
 
-// Use the data in command_buf
+// Interpet the data in command_buf as an instruction to perform some action
 void process_command_buffer() {
   printf("user entered: '%s'\n", command_buf.buffer);
 
@@ -57,9 +73,9 @@ void process_command_buffer() {
   command_buf.buffer[0] = '\0';
 }
 
-//--------------------------
+//-----------------------------------------------------------------------------
 // USB CDC callbacks
-//--------------------------
+//-----------------------------------------------------------------------------
 
 void tud_cdc_rx_cb(uint8_t itf) {
   (void)itf;

@@ -2,7 +2,7 @@
 add_executable(usb_device
         usb_device.c
         usb_descriptors.c
-        key_matrix.c
+        lard61_keymatrix.c
         lard61_cdc.c
 )
 

@@ -1,36 +1,31 @@
-// Query the state of each key and report via USB as a HID.
+/*
+** file: usb_device.c
+** author: beulard (Matthias Dubouchet)
+** creation date: 11/07/2024
+**
+** Main file for the lard61 firmware.
+** Contains the setup and main loop functions, as well as
+** "task" functions to handle HID reporting and LED blinking.
+**
+** A couple of simple USB callbacks are also defined here.
+*/
 
-#include "lard61_cdc.h"
+#include "class/hid/hid_device.h"
+#include "device/usbd.h"
 #include "hardware/gpio.h"
-#include "key_matrix.h"
-#include "pico/stdlib.h"
+#include "lard61_cdc.h"
+#include "lard61_keymatrix.h"
+#include "pico/stdio.h"
 #include "pico/time.h"
 #include "pico/types.h"
-#include "tusb.h"
 #include "tusb_config.h"
 
 #define LED_PIN PICO_DEFAULT_LED_PIN
 
-// Keymatrix column whose pin is currently high.
-// Shared state between the main process and keymatrix_gpio_callback.
-volatile uint active_col = 0;
-
-
-// TODO(mdu) move to lard61_hid file
-
-// The array is slightly larger than it need to be: we only have 61 physical
-// keys. This is just more convenient for looping over rows and columns.
-// Shared state between the main process and keymatrix_gpio_callback.
-volatile bool pressed[N_COLS * N_ROWS] = {0};
-
-// Update array of pressed keys
-void update_pressed_task();
-// Send HID report every 10ms
+// Poll the keymatrix every 1ms and send a HID report
 void hid_task();
 // Blink the led in different ways depending on usb state
 void led_task();
-// Interrupt callback for a rising edge event on one of the row pins
-void keymatrix_gpio_callback(uint gpio, uint32_t event_mask);
 
 int main() {
   // uart will only work on a Pico board, not on the actual lard61
@@ -39,14 +34,10 @@ int main() {
   tud_init(BOARD_TUD_RHPORT);
 
   l61_cdc_setup();
-  keymatrix_setup();
+  l61_keymatrix_setup();
 
   gpio_init(LED_PIN);
   gpio_set_dir(LED_PIN, GPIO_OUT);
-
-  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, true);
-  gpio_set_irq_callback(&keymatrix_gpio_callback);
-  irq_set_enabled(IO_IRQ_BANK0, true);
 
   while (true) {
     tud_task();
@@ -55,9 +46,9 @@ int main() {
   }
 }
 
-//--------------------------
+//-----------------------------------------------------------------------------
 // Blink parameters
-//--------------------------
+//-----------------------------------------------------------------------------
 
 #define BLINK_MOUNTED 250
 #define BLINK_UNMOUNTED 1000
@@ -65,51 +56,9 @@ int main() {
 
 uint blink_interval_ms = BLINK_SUSPENDED;
 
-//--------------------------
-// IRQ handlers
-//--------------------------
-
-void keymatrix_gpio_callback(uint gpio, uint32_t event_mask) {
-  // No need to call gpio_acknowledge_irq, it is called automatically
-  if (event_mask & GPIO_IRQ_EDGE_RISE) {
-    // If we see a rising edge, then the key identified by the active row and
-    // column is pressed.
-    uint row = keymatrix_get_row(gpio);
-    uint row_offset = keymatrix_get_row_offset(row);
-    pressed[row_offset + active_col] = true;
-  }
-}
-
-//--------------------------
+//-----------------------------------------------------------------------------
 // Tasks
-//--------------------------
-
-void update_pressed_task() {
-  // Turn column on, let irq on rows update the pressed table
-
-  // Reset pressed state to unpressed, let the interrupts set the state high if
-  // the key is actually pressed
-  memset((void*)pressed, 0, sizeof(pressed));
-
-  // Note active_col is set here and used in the gpio callback to write
-  // into the right location of `pressed`.
-  for (active_col = 0; active_col < N_COLS; ++active_col) {
-    for (uint row = 0; row < N_ROWS; ++row) {
-      // Enable the rising edge interrupt for our input pins
-      gpio_set_irq_enabled(row_pins[row], GPIO_IRQ_EDGE_RISE, true);
-      // Send the high signal in the active column
-      gpio_put(col_pins[active_col], true);
-
-      // Any key which is pressed here will trigger a rising edge interrupt on
-      // the associated pin, which will call keymatrix_gpio_callback to update
-      // the `pressed` table.
-
-      // Disable falling edge irq since we're about to turn the column pin low
-      gpio_set_irq_enabled(row_pins[row], GPIO_IRQ_EDGE_RISE, false);
-      gpio_put(col_pins[active_col], false);
-    }
-  }
-}
+//-----------------------------------------------------------------------------
 
 void hid_task() {
   static absolute_time_t start;
@@ -124,22 +73,14 @@ void hid_task() {
   // TODO(mdu) poll keys and send report
   // Call update_pressed and report the results !
 
-  /*
   absolute_time_t update_start = get_absolute_time();
-  update_pressed_task();
+  l61_keymatrix_update();
   int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
+  // Profiling keymatrix update
+  (void)diff;
   // printf("Time to run update: %lld us\n", diff);
 
-  // Log pressed keys
-  for (uint col = 0; col < N_COLS; ++col) {
-    for (uint row = 0; row < N_ROWS; ++row) {
-      // Check the pressed table and update
-      if (pressed[col + keymatrix_get_row_offset(row)]) {
-        printf("pressed %d %d\n", col, row);
-      }
-    }
-  }
-  */
+  l61_keymatrix_report();
 }
 
 void led_task() {
@@ -157,9 +98,9 @@ void led_task() {
   led_state = !led_state;
 }
 
-//--------------------------
+//-----------------------------------------------------------------------------
 // USB state callbacks
-//--------------------------
+//-----------------------------------------------------------------------------
 
 // USB bus is mounted (configured)
 void tud_mount_cb() {
@@ -201,7 +142,7 @@ uint16_t tud_hid_get_report_cb(uint8_t itf,
   (void)buffer;
   (void)reqlen;
 
-  tud_cdc_write_str("tud_hid_get_report_cb !!!\n");
+  l61_printf("tud_hid_get_report_cb !!!\n");
 
   return 0;
 }
@@ -216,9 +157,6 @@ void tud_hid_set_report_cb(uint8_t itf,
   // This example doesn't use multiple report and report ID
   (void)itf;
   (void)report_id;
-
-  // printf("tud_hid_set_report_cb %d %d %d %d %d\n", itf, report_id, report_type,
-        //  bufsize, buffer[0]);
 
   if (report_type == HID_REPORT_TYPE_OUTPUT) {
     // bufsize should be (at least) 1
