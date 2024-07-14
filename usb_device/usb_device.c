@@ -10,10 +10,12 @@
 ** A couple of simple USB callbacks are also defined here.
 */
 
+#include <stdint.h>
 #include "class/hid/hid_device.h"
 #include "device/usbd.h"
 #include "hardware/gpio.h"
 #include "lard61_cdc.h"
+#include "lard61_keycodes.h"
 #include "lard61_keymatrix.h"
 #include "pico/stdio.h"
 #include "pico/time.h"
@@ -64,23 +66,68 @@ void hid_task() {
   static absolute_time_t start;
   absolute_time_t t = get_absolute_time();
 
-  // Every 10ms, send a report
-  if (absolute_time_diff_us(start, t) < 10000) {
+  // As soon as HID interface is ready, send a report
+  if (!tud_hid_ready()) {
     return;
+  } else {
+    // l61_printf("hid ready after %lld us\n", absolute_time_diff_us(start, t));
+    start = get_absolute_time();
+    (void)t;
+    (void)start;
   }
-  start = get_absolute_time();
-
-  // TODO(mdu) poll keys and send report
-  // Call update_pressed and report the results !
 
   absolute_time_t update_start = get_absolute_time();
   l61_keymatrix_update();
   int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
   // Profiling keymatrix update
   (void)diff;
-  // printf("Time to run update: %lld us\n", diff);
+  // l61_printf("Time to run update: %lld us\n", diff);
 
-  l61_keymatrix_report();
+  // l61_keymatrix_report();
+
+  // Value of next_idx after the last report
+  static uint prev_pressed_count = 0;
+  // Pressed key keycodes
+  uint8_t keycode[6] = {0};
+  // To index into `keycode`
+  uint next_idx = 0;
+
+  // Transform the "pressed" table from l61_keymatrix into
+  // the hid 6-byte keycode report
+  for (uint i = 0; i < N_ROWS * N_COLS; ++i) {
+    // Avoid overflowing the buffer if too many keys are pressed
+    if (next_idx >= 6)
+      break;
+
+    if (l61_keymatrix_is_key_pressed(i)) {
+      // l61_printf("key %d pressed\n", i);
+      if (l61_keymatrix_is_fn_key_pressed()) {
+        keycode[next_idx++] = l61_hid_keycode_fn[i];
+      } else {
+        keycode[next_idx++] = l61_hid_keycode[i];
+      }
+    }
+
+    // Do not report more than one additional key compared to the previous
+    // report. This prevents multiple keys being repeated.
+    //
+    // Without this, if the user presses and holds Q and W simultaneously,
+    // the host will repeat both q and w, yielding "qwqwqwqwqw...". The expected
+    // behaviour is to repeat the last key that was pressed, so in case of
+    // exactly simultaneous keypresses, give priority to the lowest key index.
+    if (next_idx >= prev_pressed_count + 1)
+      break;
+  }
+
+  prev_pressed_count = next_idx;
+
+  if (next_idx == 0) {
+    tud_hid_keyboard_report(0, 0, NULL);
+  } else {
+    // l61_printf("sending keycodes: %d %d %d %d %d %d\n", keycode[0],
+    //            keycode[1], keycode[2], keycode[3], keycode[4], keycode[5]);
+    tud_hid_keyboard_report(0, 0, keycode);
+  }
 }
 
 void led_task() {
@@ -128,21 +175,16 @@ void tud_resume_cb() {
 //--------------------------------------------------------------------+
 
 // Invoked when received GET_REPORT control request
-// Application must fill buffer report's content and return its length.
-// Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t itf,
                                uint8_t report_id,
                                hid_report_type_t report_type,
                                uint8_t* buffer,
                                uint16_t reqlen) {
-  // TODO not Implemented
   (void)itf;
   (void)report_id;
   (void)report_type;
   (void)buffer;
   (void)reqlen;
-
-  l61_printf("tud_hid_get_report_cb !!!\n");
 
   return 0;
 }

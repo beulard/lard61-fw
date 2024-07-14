@@ -15,19 +15,22 @@
 //-----------------------------------------------------------------------------
 
 // Keymatrix column whose pin is currently high.
-// Shared state between the main process and keymatrix_gpio_callback.
+// Shared state between the main process and l61_keymatrix_gpio_callback.
 volatile uint active_col = 0;
 
 // The array is slightly larger than it need to be: we only have 61 physical
 // keys. This is just more convenient for looping over rows and columns.
-// Shared state between the main process and keymatrix_gpio_callback.
+// Shared state between the main process and l61_keymatrix_gpio_callback.
 volatile bool pressed[N_COLS * N_ROWS] = {0};
+
+// Index of the function key in `pressed`
+#define L61_FN_KEY 63
 
 // Number of keys per row in the keymatrix
 static const uint n_keys_in_row[N_ROWS] = {14, 14, 13, 12, 8};
 
 // GPIO pins for each row
-static const uint row_pins[N_ROWS] = {
+static const uint row_pin[N_ROWS] = {
     19,  // row0
     20,  // row1
     21,  // row2
@@ -35,40 +38,56 @@ static const uint row_pins[N_ROWS] = {
     18,  // row4
 };
 
-// GPIO pins for each column
-// TODO(mdu) clean up
-static const uint col_pins[N_COLS] = {
+// Used as a bitmask for the return value of gpio_get_all(),
+// to determine if all row pins are low.
+static const uint row_pin_mask = (1 << row_pin[0]) | (1 << row_pin[1]) |
+                                 (1 << row_pin[2]) | (1 << row_pin[3]) |
+                                 (1 << row_pin[4]);
+
+#ifndef LARD61
+// Change GPIO mapping on Pico to avoid interfering
+// with LED and UART pins.
+static const uint col_pin[N_COLS] = {
     23,  // col0
-#ifdef LARD61
-    25,  // col1
-#elif defined RASPBERRYPI_PICO
-    // Used for LED
+    // Pin 25 is the LED pin on Pico
+    // => change to same pin as col0
     23,  // col1
-#else
-    #error Unknown board
-#endif
     26,  // col2
     24,  // col3
     27,  // col4
     28,  // col5
     29,  // col6
-#ifdef LARD61
+    // Pins 0, 1 are used for uart comm on dev Pico
+    // => change to same pin as col6
+    29,  // col7
+    29,  // col8
+}
+#else
+// GPIO pins for each column
+static const uint col_pin[N_COLS] = {
+    23,  // col0
+    25,  // col1
+    26,  // col2
+    24,  // col3
+    27,  // col4
+    28,  // col5
+    29,  // col6
     0,   // col7
     1,   // col8
-#elif defined RASPBERRYPI_PICO
-    // Also used for uart comm on dev Pico => use col6 pin
-    29,  // 0,   // col7
-    29,  // 1,   // col8
-#else
-    #error Unknown board
-#endif
     2,   // col9
     3,   // col10
     4,   // col11
     5,   // col12
     6,   // col12
 };
+#endif
 
+//-----------------------------------------------------------------------------
+// Internal API
+//-----------------------------------------------------------------------------
+
+// Interrupt callback for a rising edge event on one of the row pins
+void l61_keymatrix_gpio_callback(uint gpio, uint32_t event_mask);
 
 //-----------------------------------------------------------------------------
 // Public API
@@ -76,25 +95,23 @@ static const uint col_pins[N_COLS] = {
 
 void l61_keymatrix_setup() {
   // Set all row pins as input
-  // printf("Row pins\n");
-  for (uint i = 0; i < N_ROWS; ++i) {
-    // printf("%d => %d\n", i, row_pins[i]);
-    gpio_init(row_pins[i]);
-    gpio_set_dir(row_pins[i], GPIO_IN);
+  for (uint row = 0; row < N_ROWS; ++row) {
+    gpio_init(row_pin[row]);
+    gpio_set_dir(row_pin[row], GPIO_IN);
   }
 
   // Set all column pins as output
-  // printf("Col pins\n");
-  for (uint i = 0; i < N_COLS; ++i) {
-    // printf("%d => %d\n", i, col_pins[i]);
-    gpio_init(col_pins[i]);
-    gpio_set_dir(col_pins[i], GPIO_OUT);
+  for (uint col = 0; col < N_COLS; ++col) {
+    gpio_init(col_pin[col]);
+    gpio_set_dir(col_pin[col], GPIO_OUT);
   }
 
   printf("Key matrix pins configured\n");
 
   // Enable rising edge interrupt on all row pins
-  gpio_set_irq_enabled(row_pins[0], GPIO_IRQ_EDGE_RISE, true);
+  for (uint row = 0; row < N_ROWS; ++row) {
+    gpio_set_irq_enabled(row_pin[row], GPIO_IRQ_EDGE_RISE, true);
+  }
   gpio_set_irq_callback(&l61_keymatrix_gpio_callback);
   irq_set_enabled(IO_IRQ_BANK0, true);
 
@@ -126,31 +143,48 @@ uint l61_keymatrix_get_row_offset(uint row) {
   return offset;
 }
 
-// TODO(mdu) rename once we know what hid report is expecting
 void l61_keymatrix_update() {
   // Turn column on, let irq on rows update the pressed table
 
   // Reset pressed state to unpressed, let the interrupts set the state high if
   // the key is actually pressed
-  memset((void*)pressed, 0, sizeof(pressed));
+  for (uint i = 0; i < N_ROWS * N_COLS; ++i) {
+    pressed[i] = 0;
+  }
+
+  // Enable GPIO interrupt on all row pins
+  for (uint row = 0; row < N_ROWS; ++row) {
+    gpio_set_irq_enabled(row_pin[row], GPIO_IRQ_EDGE_RISE, true);
+  }
 
   // Note active_col is set here and used in the gpio callback to write
   // into the right location of `pressed`.
+  // l61_printf("enabling irq on row %d\n", row);
+
   for (active_col = 0; active_col < N_COLS; ++active_col) {
-    for (uint row = 0; row < N_ROWS; ++row) {
-      // Enable the rising edge interrupt for our input pins
-      gpio_set_irq_enabled(row_pins[row], GPIO_IRQ_EDGE_RISE, true);
-      // Send the high signal in the active column
-      gpio_put(col_pins[active_col], true);
+    // l61_printf("Polling for row %d, col %d\n", row, active_col);
+    // Enable the rising edge interrupt for our input pins
+    // Send the high signal in the active column
+    gpio_put(col_pin[active_col], true);
 
-      // Any key which is pressed here will trigger a rising edge interrupt on
-      // the associated pin, which will call keymatrix_gpio_callback to update
-      // the `pressed` table.
+    // Any key which is pressed here will trigger a rising edge interrupt on
+    // the associated pin, which will call l61_keymatrix_gpio_callback to update
+    // the `pressed` table.
 
-      // Disable falling edge irq since we're about to turn the column pin low
-      gpio_set_irq_enabled(row_pins[row], GPIO_IRQ_EDGE_RISE, false);
-      gpio_put(col_pins[active_col], false);
+    // Disable falling edge irq since we're about to turn the column pin low
+    gpio_put(col_pin[active_col], false);
+
+    // Before moving on to the next column, wait for all row pins to be low.
+    // Otherwise, we will miss rising edges on the next iteration.
+    // uint loop_count = 0;
+    while ((gpio_get_all() & row_pin_mask) != 0) {
+      // loop_count++;
     }
+    // if (loop_count > 0)
+    //   l61_printf("row pins at 0 after %d iterations\n", loop_count);
+  }
+  for (uint row = 0; row < N_ROWS; ++row) {
+    gpio_set_irq_enabled(row_pin[row], GPIO_IRQ_EDGE_RISE, false);
   }
 }
 
@@ -166,11 +200,22 @@ void l61_keymatrix_report() {
   }
 }
 
+bool l61_keymatrix_is_key_pressed(uint index) {
+  return pressed[index];
+}
+
+bool l61_keymatrix_is_fn_key_pressed() {
+  return pressed[L61_FN_KEY];
+}
+
 //-----------------------------------------------------------------------------
 // IRQ callbacks
 //-----------------------------------------------------------------------------
 
 void l61_keymatrix_gpio_callback(uint gpio, uint32_t event_mask) {
+  // l61_printf("gpio callback for pin %d, mask %d, active_col=%d\n", gpio,
+  //            event_mask, active_col);
+
   // No need to call gpio_acknowledge_irq, it is called automatically
   if (event_mask & GPIO_IRQ_EDGE_RISE) {
     // If we see a rising edge, then the key identified by the active row and
