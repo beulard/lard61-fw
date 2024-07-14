@@ -53,6 +53,21 @@ void l61_printf(const char* fmt, ...) {
 // Internal API
 //-----------------------------------------------------------------------------
 
+// Display the welcome message
+void print_welcome() {
+    l61_printf("Hi from lard61 !\n");
+    l61_printf("- RP2040 chip version: %d\n", rp2040_chip_version());
+    l61_printf("- RP2040 rom version: %d\n\n", rp2040_rom_version());
+}
+
+// Display the help message
+void print_help() {
+    l61_printf("Available commands:\n");
+    l61_printf("- hi: greet\n");
+    l61_printf("- help: you don't need help\n");
+    l61_printf("- flash: restart in bootsel mode\n");
+}
+
 // Interpet the data in command_buf as an instruction to perform some action
 void process_command_buffer() {
   printf("user entered: '%s'\n", command_buf.buffer);
@@ -62,6 +77,8 @@ void process_command_buffer() {
   } else if (strcmp(command_buf.buffer, "flash") == 0) {
     l61_printf("restarting in bootsel mode...\n");
     reset_usb_boot(1 << PICO_DEFAULT_LED_PIN, 0);
+  } else if (strcmp(command_buf.buffer, "help") == 0) {
+    print_help();
   } else if (strlen(command_buf.buffer) == 0) {
     // pass
   } else {
@@ -82,7 +99,7 @@ void tud_cdc_rx_cb(uint8_t itf) {
 
   // Store the new data in the command buffer
   while (tud_cdc_available()) {
-    if (command_buf.write < command_buf.buffer + LARD61_COMMAND_BUFFER_SIZE) {
+    if (command_buf.write < command_buf.buffer + LARD61_COMMAND_BUFFER_SIZE - 1) {
       int32_t c = tud_cdc_read_char();
       if (c == '\r')
         continue;
@@ -91,8 +108,9 @@ void tud_cdc_rx_cb(uint8_t itf) {
       command_buf.write++;
       (*command_buf.write) = '\0';
     } else {
+      l61_printf("\nToo many chars in command_buf ! Can't process next command\n");
+      // Reset the write ptr to the start of the buffer
       command_buf.write = command_buf.buffer;
-      printf("\nToo many chars in command_buf ! Can't process next command\n");
     }
   }
   l61_printf("\r=> %s", command_buf.buffer);
@@ -104,14 +122,8 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
 
   if (dtr && rts) {
     // say hi on connection :)
-    l61_printf("Hi from lard61 !\n");
-    l61_printf("- RP2040 chip version: %d\n", rp2040_chip_version());
-    l61_printf("- RP2040 rom version: %d\n", rp2040_rom_version());
-    l61_printf("\n");
-    l61_printf("Available commands:\n");
-    l61_printf("- hi: greet\n");
-    l61_printf("- help: you don't need help\n");
-    l61_printf("- flash: restart in bootsel mode\n");
+    print_welcome();
+    print_help();
   }
 }
 
