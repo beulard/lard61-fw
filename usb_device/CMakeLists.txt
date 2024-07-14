@@ -8,8 +8,15 @@ add_executable(usb_device
 
 target_compile_options(usb_device PUBLIC -Wall -Wextra)
 
-# enable output via usb cdc
-pico_enable_stdio_uart(usb_device 1)
+if (${PICO_BOARD} STREQUAL "lard61")
+ message("Configuring for lard61 -> disable usb and uart stdio")
+ pico_enable_stdio_uart(usb_device 0)
+ pico_enable_stdio_usb(usb_device 0)
+else ()
+ message("Configuring for pico -> enable uart stdio")
+ pico_enable_stdio_uart(usb_device 1)
+ pico_enable_stdio_usb(usb_device 0)
+endif()
 
 # Required for tinyusb to find our tusb_config.h
 target_include_directories(usb_device PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
