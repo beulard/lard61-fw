@@ -6,7 +6,7 @@ add_executable(usb_device
         lard61_cdc.c
 )
 
-target_compile_options(usb_device PUBLIC -Wall -Wextra)
+target_compile_options(usb_device PUBLIC -Wall -Wextra -fdiagnostics-color=always)
 
 if (${PICO_BOARD} STREQUAL "lard61")
  message("Configuring for lard61 -> disable usb and uart stdio")
