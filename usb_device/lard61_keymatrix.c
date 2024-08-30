@@ -9,21 +9,39 @@
 #include <string.h>
 #include "hardware/gpio.h"
 #include "lard61_cdc.h"
+#include "pico/time.h"
+#include "pico/types.h"
 
 //-----------------------------------------------------------------------------
 // Static variables
 //-----------------------------------------------------------------------------
 
+// Minimum time between a key being first pressed/released and the
+// moment it is registered
+#define DEBOUNCE_THRESHOLD_MS 4
+
+// Time of the last occurrence of a key state change
+// The debounced keymatrix state will be updated once the time difference
+// becomes greater than DEBOUNCE_THRESHOLD
+absolute_time_t last_change_time = 0;
+
 // Keymatrix column whose pin is currently high.
 // Shared state between the main process and l61_keymatrix_gpio_callback.
 volatile uint active_col = 0;
 
-// The array is slightly larger than it need to be: we only have 61 physical
-// keys. This is just more convenient for looping over rows and columns.
-// Shared state between the main process and l61_keymatrix_gpio_callback.
-volatile bool pressed[N_COLS * N_ROWS] = {0};
+// The following arrays are slightly larger than they need to be: we only
+// have 61 physical keys. This is just more convenient for looping over
+// rows and columns.
 
-// Index of the function key in `pressed`
+// Keys that are registered as pressed, after debouncing
+bool pressed[N_COLS * N_ROWS] = {0};
+// Encodes whether a key was down in the last call to l61_keymatrix_update.
+bool pressed_last[N_COLS * N_ROWS] = {0};
+// Whether the key is down during the current call to l61_keymatrix_update.
+// Shared state between the main process and l61_keymatrix_gpio_callback.
+volatile bool pressed_this_update[N_COLS * N_ROWS] = {false};
+
+// Index of the function (Fn) key in the above arrays.
 #define L61_FN_KEY 63
 
 // Number of keys per row in the keymatrix
@@ -144,12 +162,10 @@ uint l61_keymatrix_get_row_offset(uint row) {
 }
 
 void l61_keymatrix_update() {
-  // Turn column on, let irq on rows update the pressed table
+  // Turn each column on, let irq on rows update the pressed table
 
-  // Reset pressed state to unpressed, let the interrupts set the state high if
-  // the key is actually pressed
   for (uint i = 0; i < N_ROWS * N_COLS; ++i) {
-    pressed[i] = 0;
+    pressed_this_update[i] = false;
   }
 
   // Enable GPIO interrupt on all row pins
@@ -158,7 +174,7 @@ void l61_keymatrix_update() {
   }
 
   // Note active_col is set here and used in the gpio callback to write
-  // into the right location of `pressed`.
+  // into the right location of `pressed_this_update`.
   // l61_printf("enabling irq on row %d\n", row);
 
   for (active_col = 0; active_col < N_COLS; ++active_col) {
@@ -186,6 +202,39 @@ void l61_keymatrix_update() {
   for (uint row = 0; row < N_ROWS; ++row) {
     gpio_set_irq_enabled(row_pin[row], GPIO_IRQ_EDGE_RISE, false);
   }
+
+  // Debouncing: only register a change of state if the entire keyboard
+  // state has stayed the same for DEBOUNCE_THRESHOLD_MS.
+
+  // Start by checking if any key state has changed.
+
+  bool changed = false;
+  for (uint i = 0; i < N_COLS * N_ROWS; ++i) {
+    if (pressed_this_update[i] && !pressed_last[i]) {
+      changed = true;
+    } else if (!pressed_this_update[i] && pressed_last[i]) {
+      changed = true;
+    }
+    pressed_last[i] = pressed_this_update[i];
+  }
+
+  absolute_time_t t = get_absolute_time();
+
+  // If the key state has changed, reset the last changed time
+  if (changed) {
+    last_change_time = t;
+    // l61_printf("change, lct = %lld\n", last_change_time);
+  }
+
+  if (absolute_time_diff_us(last_change_time, t) >
+      DEBOUNCE_THRESHOLD_MS * 1000) {
+    last_change_time = t;
+    // l61_printf("register, lct = %lld, cur = %d\n", last_change_time, t);
+    // Record the current key state
+    for (uint i = 0; i < N_COLS * N_ROWS; ++i) {
+      pressed[i] = pressed_this_update[i];
+    }
+  }
 }
 
 void l61_keymatrix_report() {
@@ -193,8 +242,9 @@ void l61_keymatrix_report() {
   for (uint col = 0; col < N_COLS; ++col) {
     for (uint row = 0; row < N_ROWS; ++row) {
       // Check the pressed table and update
-      if (pressed[col + l61_keymatrix_get_row_offset(row)]) {
-        l61_printf("pressed %d %d\n", col, row);
+      uint key_idx = col + l61_keymatrix_get_row_offset(row);
+      if (l61_keymatrix_is_key_pressed(key_idx)) {
+        l61_printf("pressed %d %d -> %d\n", col, row, pressed[key_idx]);
       }
     }
   }
@@ -205,7 +255,7 @@ bool l61_keymatrix_is_key_pressed(uint index) {
 }
 
 bool l61_keymatrix_is_fn_key_pressed() {
-  return pressed[L61_FN_KEY];
+  return l61_keymatrix_is_key_pressed(L61_FN_KEY);
 }
 
 //-----------------------------------------------------------------------------
@@ -222,6 +272,6 @@ void l61_keymatrix_gpio_callback(uint gpio, uint32_t event_mask) {
     // column is pressed.
     uint row = l61_keymatrix_get_row(gpio);
     uint row_offset = l61_keymatrix_get_row_offset(row);
-    pressed[row_offset + active_col] = true;
+    pressed_this_update[row_offset + active_col] = true;
   }
 }

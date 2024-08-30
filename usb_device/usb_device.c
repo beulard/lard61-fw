@@ -43,6 +43,7 @@ int main() {
 
   while (true) {
     tud_task();
+    l61_keymatrix_update();
     hid_task();
     led_task();
   }
@@ -75,13 +76,6 @@ void hid_task() {
     (void)t;
     (void)start;
   }
-
-  absolute_time_t update_start = get_absolute_time();
-  l61_keymatrix_update();
-  int64_t diff = absolute_time_diff_us(update_start, get_absolute_time());
-  // Profiling keymatrix update
-  (void)diff;
-  // l61_printf("Time to run update: %lld us\n", diff);
 
   // l61_keymatrix_report();
 

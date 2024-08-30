@@ -26,6 +26,7 @@ uint l61_keymatrix_get_row(uint gpio);
 uint l61_keymatrix_get_row_offset(uint row);
 
 // Query the state of all keys on the keyboard
+// Return true if the state has changed (after debouncing)
 void l61_keymatrix_update();
 // Print out what keys are pressed according to the last call
 // to l61_keymatrix_update
