@@ -99,6 +99,8 @@ const uint8_t l61_hid_keycode[N_ROWS * N_COLS] = {
 // - Backtick (GRAVE) on the top left ESC key
 // - F1-F12 keys on the top layer
 // - Directional arrows on WASD, PG_UP on Q, PG_DOWN on E
+// - Directional arrows on PL:" for one-handed motions
+// - Delete key on backspace
 // - HOME on R, END on F
 const uint8_t l61_hid_keycode_fn[N_ROWS * N_COLS] = {
     // Row 0: index 0-13
@@ -115,7 +117,7 @@ const uint8_t l61_hid_keycode_fn[N_ROWS * N_COLS] = {
     HID_KEY_F10,
     HID_KEY_F11,
     HID_KEY_F12,
-    HID_KEY_BACKSPACE,
+    HID_KEY_DELETE,
     // Row 1: index 14-27
     HID_KEY_TAB,
     HID_KEY_PAGE_UP,
@@ -127,7 +129,7 @@ const uint8_t l61_hid_keycode_fn[N_ROWS * N_COLS] = {
     HID_KEY_U,
     HID_KEY_I,
     HID_KEY_O,
-    HID_KEY_P,
+    HID_KEY_ARROW_UP,
     HID_KEY_BRACKET_LEFT,
     HID_KEY_BRACKET_RIGHT,
     HID_KEY_BACKSLASH,
@@ -141,9 +143,9 @@ const uint8_t l61_hid_keycode_fn[N_ROWS * N_COLS] = {
     HID_KEY_H,
     HID_KEY_J,
     HID_KEY_K,
-    HID_KEY_L,
-    HID_KEY_SEMICOLON,
-    HID_KEY_APOSTROPHE,
+    HID_KEY_ARROW_LEFT,
+    HID_KEY_ARROW_DOWN,
+    HID_KEY_ARROW_RIGHT,
     HID_KEY_ENTER,
     // Row 3: index 41-52
     HID_KEY_SHIFT_LEFT,
