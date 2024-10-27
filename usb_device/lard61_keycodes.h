@@ -12,10 +12,23 @@
 #include "class/hid/hid.h"
 #include "lard61_keymatrix.h"
 
+// Identifiers for specific keys
+// Use as argument to l61_keymatrix_is_key_pressed to check for
+// specific keys
+enum L61_KEY_INDEX {
+  L61_KEY_GRAVE = 0,
+  L61_KEY_R = 18,
+  L61_KEY_LEFT_CONTROL = 53,
+  L61_KEY_LEFT_ALT = 55,
+  L61_KEY_FN = 63,
+};
+
 // HID keycode associated to each key
+// Differences with usual ANSI layout:
+// - Caps lock is replaced by escape
 const uint8_t l61_hid_keycode[N_ROWS * N_COLS] = {
     // Row 0: index 0-13
-    HID_KEY_ESCAPE,
+    HID_KEY_GRAVE,
     HID_KEY_1,
     HID_KEY_2,
     HID_KEY_3,
@@ -45,7 +58,7 @@ const uint8_t l61_hid_keycode[N_ROWS * N_COLS] = {
     HID_KEY_BRACKET_RIGHT,
     HID_KEY_BACKSLASH,
     // Row 2: index 28-40
-    HID_KEY_CAPS_LOCK,
+    HID_KEY_ESCAPE,  // Caps lock replaced with escape
     HID_KEY_A,
     HID_KEY_S,
     HID_KEY_D,
@@ -84,7 +97,8 @@ const uint8_t l61_hid_keycode[N_ROWS * N_COLS] = {
     HID_KEY_NONE,
     HID_KEY_ALT_RIGHT,
     HID_KEY_GUI_RIGHT,
-    HID_KEY_NONE, // Function/layer key
+    HID_KEY_NONE,  // Function/layer key, handled in
+                   // l61_keymatrix_is_fn_key_pressed
     HID_KEY_CONTROL_RIGHT,
     // The rest of the keymatrix does not correspond to a key
     HID_KEY_NONE,
@@ -102,9 +116,11 @@ const uint8_t l61_hid_keycode[N_ROWS * N_COLS] = {
 // - Directional arrows on PL:" for one-handed motions
 // - Delete key on backspace
 // - HOME on R, END on F
+// - Caps lock on the physical caps lock key
+// - Escape on the top left key (tilde)
 const uint8_t l61_hid_keycode_fn[N_ROWS * N_COLS] = {
     // Row 0: index 0-13
-    HID_KEY_GRAVE,
+    HID_KEY_ESCAPE,  // Tilde becomes secondary Esc
     HID_KEY_F1,
     HID_KEY_F2,
     HID_KEY_F3,
@@ -173,7 +189,7 @@ const uint8_t l61_hid_keycode_fn[N_ROWS * N_COLS] = {
     HID_KEY_NONE,
     HID_KEY_ALT_RIGHT,
     HID_KEY_GUI_RIGHT,
-    HID_KEY_NONE, // Function/layer key
+    HID_KEY_NONE,  // Function/layer key
     HID_KEY_CONTROL_RIGHT,
     // The rest of the keymatrix does not correspond to a key
     HID_KEY_NONE,

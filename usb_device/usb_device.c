@@ -17,6 +17,7 @@
 #include "lard61_cdc.h"
 #include "lard61_keycodes.h"
 #include "lard61_keymatrix.h"
+#include "pico/bootrom.h"
 #include "pico/stdio.h"
 #include "pico/time.h"
 #include "pico/types.h"
@@ -85,6 +86,15 @@ void hid_task() {
   uint8_t keycode[6] = {0};
   // To index into `keycode`
   uint next_idx = 0;
+
+  // Check for the magic reflash combination:
+  // If user presses Ctrl + Alt + Fn + R, reboot in usb flash mode
+  if (l61_keymatrix_is_key_pressed(L61_KEY_LEFT_CONTROL) &&
+      l61_keymatrix_is_key_pressed(L61_KEY_LEFT_ALT) &&
+      l61_keymatrix_is_key_pressed(L61_KEY_FN) &&
+      l61_keymatrix_is_key_pressed(L61_KEY_R)) {
+    reset_usb_boot(1 << PICO_DEFAULT_LED_PIN, 0);
+  }
 
   // Transform the "pressed" table from l61_keymatrix into
   // the hid 6-byte keycode report

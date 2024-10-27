@@ -23,7 +23,7 @@
 // Time of the last occurrence of a key state change
 // The debounced keymatrix state will be updated once the time difference
 // becomes greater than DEBOUNCE_THRESHOLD
-absolute_time_t last_change_time = 0;
+absolute_time_t last_change_time;
 
 // Keymatrix column whose pin is currently high.
 // Shared state between the main process and l61_keymatrix_gpio_callback.

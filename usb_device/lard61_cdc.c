@@ -66,6 +66,7 @@ void print_help() {
     l61_printf("- hi: greet\n");
     l61_printf("- help: you don't need help\n");
     l61_printf("- flash: restart in bootsel mode\n");
+    l61_printf("Magic reflash combination is: Ctrl + Alt + Fn + R\n");
 }
 
 // Interpet the data in command_buf as an instruction to perform some action
